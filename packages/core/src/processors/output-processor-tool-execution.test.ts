@@ -223,13 +223,16 @@ describe('Output Processor State Persistence Across Tool Execution', () => {
     expect(finishChunks.length).toBe(1);
 
     const toolCallIndex = capturedChunks.findIndex(c => c.type === 'tool-call');
-    expect(toolCallIndex).toBe(1); // Should be the second chunk (after response-metadata)
+    expect(toolCallIndex).toBe(2); // After step-start and response-metadata
 
     // Verify state accumulation works
-    expect(capturedChunks[0]!.type).toBe('response-metadata');
-    expect(capturedChunks[0]!.accumulatedTypes).toEqual(['response-metadata']);
+    expect(capturedChunks[0]!.type).toBe('step-start');
+    expect(capturedChunks[0]!.accumulatedTypes).toEqual(['step-start']);
 
-    expect(capturedChunks[1]!.type).toBe('tool-call');
-    expect(capturedChunks[1]!.accumulatedTypes).toEqual(['response-metadata', 'tool-call']);
+    expect(capturedChunks[1]!.type).toBe('response-metadata');
+    expect(capturedChunks[1]!.accumulatedTypes).toEqual(['step-start', 'response-metadata']);
+
+    expect(capturedChunks[2]!.type).toBe('tool-call');
+    expect(capturedChunks[2]!.accumulatedTypes).toEqual(['step-start', 'response-metadata', 'tool-call']);
   });
 });
