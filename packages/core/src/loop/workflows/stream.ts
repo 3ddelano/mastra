@@ -35,13 +35,16 @@ export function workflowLoopStream<Tools extends ToolSet = ToolSet, OUTPUT = und
       // Normalize requestContext so data-chunk processors and the agentic loop share the same instance
       const requestContext = rest.requestContext ?? new RequestContext();
 
-      // Create a ProcessorRunner for data-* chunks so they go through output processors
+      // Create a ProcessorRunner for non-model chunks (data-*, step-start, step-finish)
+      // so they go through output processors. Uses the shared processorStates map so that
+      // processor state set during model chunk processing is visible here and vice versa.
       const hasOutputProcessors = rest.outputProcessors && rest.outputProcessors.length > 0;
       const dataChunkProcessorRunner = hasOutputProcessors
         ? new ProcessorRunner({
             outputProcessors: rest.outputProcessors,
             logger: rest.logger || new ConsoleLogger({ level: 'error' }),
             agentName: agentId || 'unknown',
+            processorStates: rest.processorStates,
           })
         : undefined;
       const dataChunkProcessorStates = hasOutputProcessors ? new Map<string, ProcessorState>() : undefined;
@@ -54,12 +57,58 @@ export function workflowLoopStream<Tools extends ToolSet = ToolSet, OUTPUT = und
       };
 
       const outputWriter = async (chunk: ChunkType<OUTPUT>) => {
+        // Route step-start/step-finish through output processors so they are visible
+        // in processOutputStream. Uses the shared processorStates to maintain state
+        // continuity with model chunk processing.
+        if (chunk.type === 'step-start' || chunk.type === 'step-finish') {
+          if (dataChunkProcessorRunner) {
+            const {
+              part: processed,
+              blocked,
+              reason,
+              tripwireOptions,
+              processorId,
+            } = await dataChunkProcessorRunner.processPart(
+              chunk,
+              (rest.processorStates ?? dataChunkProcessorStates!) as Map<string, ProcessorState<OUTPUT>>,
+              undefined,
+              requestContext,
+              messageList,
+              0,
+              dataChunkStreamWriter,
+            );
+
+            if (blocked) {
+              safeEnqueue(controller, {
+                type: 'tripwire',
+                runId,
+                from: ChunkFrom.AGENT,
+                payload: {
+                  reason: reason || 'Output processor blocked content',
+                  retry: tripwireOptions?.retry,
+                  metadata: tripwireOptions?.metadata,
+                  processorId,
+                },
+              } as ChunkType<OUTPUT>);
+              return;
+            }
+
+            if (processed) {
+              safeEnqueue(controller, processed as ChunkType<OUTPUT>);
+            }
+            return;
+          }
+
+          safeEnqueue(controller, chunk);
+          return;
+        }
+
         // Handle data-* chunks (custom data chunks from writer.custom())
         // These need to be persisted to storage, not just streamed
         // Transient chunks are streamed to the client but not saved to the DB
         if (chunk.type.startsWith('data-')) {
           // Run data-* chunks through output processors before persisting
-          let processedChunk = chunk;
+          let processedChunk: ChunkType<OUTPUT> = chunk;
           if (dataChunkProcessorRunner) {
             const {
               part: processed,
