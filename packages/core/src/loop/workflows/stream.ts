@@ -36,8 +36,6 @@ export function workflowLoopStream<Tools extends ToolSet = ToolSet, OUTPUT = und
       const requestContext = rest.requestContext ?? new RequestContext();
 
       // Create a ProcessorRunner for non-model chunks (data-*, step-start, step-finish)
-      // so they go through output processors. Uses the shared processorStates map so that
-      // processor state set during model chunk processing is visible here and vice versa.
       const hasOutputProcessors = rest.outputProcessors && rest.outputProcessors.length > 0;
       const dataChunkProcessorRunner = hasOutputProcessors
         ? new ProcessorRunner({
@@ -57,9 +55,6 @@ export function workflowLoopStream<Tools extends ToolSet = ToolSet, OUTPUT = und
       };
 
       const outputWriter = async (chunk: ChunkType<OUTPUT>) => {
-        // Route step-start/step-finish through output processors so they are visible
-        // in processOutputStream. Uses the shared processorStates to maintain state
-        // continuity with model chunk processing.
         if (chunk.type === 'step-start' || chunk.type === 'step-finish') {
           if (dataChunkProcessorRunner) {
             const {
